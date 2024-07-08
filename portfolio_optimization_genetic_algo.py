@@ -4,8 +4,24 @@ import platform
 from typing import List, Tuple
 
 import ipdb
+import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+
+"""
+TODO: Incoporate off-diagonal solutions.
+"""
+
+N = 50
+MU = 0.10
+SIGMA = 0.90
+ALPHA = np.random.normal(loc=MU, scale=SIGMA, size=N)
+COV = np.diag(np.square(np.random.normal(loc=SIGMA, scale=SIGMA, size=N)))
+W = np.dot(np.linalg.inv(COV), ALPHA) / np.linalg.norm(
+    np.dot(np.linalg.inv(COV), ALPHA), 1
+)
+SR = np.dot(np.transpose(W), ALPHA) / np.sqrt(np.dot(np.dot(np.transpose(W), COV), W))
+print(SR)
 
 
 class GeneticAlgorithm:
@@ -29,19 +45,36 @@ class GeneticAlgorithm:
 
         # Initialize attributes
         self.fitness_evolution: List[float] = []
+        self.mean_fitness_evolution: List[float] = []
 
         return
 
     def initialize_population(self) -> List[List[int]]:
-        return [
-            [random.randint(0, 1) for _ in range(self.chromosome_length)]
+        """
+        Implement custom initialization protocol.
+        """
+
+        # Randomly initialize and scale Standard Gaussian weights
+        initial_population = [
+            np.random.standard_normal(size=self.chromosome_length)
             for _ in range(self.population_size)
         ]
+        initial_population = [
+            list(chromosome / np.sum(np.abs(chromosome)))
+            for chromosome in initial_population
+        ]
+
+        return initial_population
 
     def fitness(self, chromosome: List[int]) -> int:
 
-        # Define your fitness function here - currently the optimal solution is chromosome length
-        return sum(chromosome)
+        # Ex ante Sharpe Ratio - chromosomes represent portfolio weights
+        sr = np.dot(np.transpose(chromosome), ALPHA) / np.sqrt(
+            np.dot(np.dot(np.transpose(chromosome), COV), chromosome)
+        )
+
+        # Define your fitness function here
+        return sr
 
     def selection(self) -> List[int]:
         """
@@ -88,7 +121,13 @@ class GeneticAlgorithm:
 
             # If mutation probability threshold is violated, mutate gene by flipping bit
             if random.random() < self.mutation_rate:
-                chromosome[i] = 1 - chromosome[i]
+
+                # Adjust this perturbation based on derivative between current chromose and prev best chromosome
+
+                # Mutation protocol to randomly perturb portfolio weights based on Gaussian noise - standard deviation is a function of portfolio size
+                sigma = 1 / self.chromosome_length
+                mutation = np.random.normal(loc=0, scale=sigma)
+                chromosome[i] += mutation
 
         return chromosome
 
@@ -115,17 +154,21 @@ class GeneticAlgorithm:
 
     def run(self, generations: int) -> None:
 
-        for _ in range(generations):
+        for i in range(generations):
 
             self.evolve()
             best_chromosome = max(self.population, key=self.fitness)
             best_fitness = self.fitness(best_chromosome)
             self.fitness_evolution.append(best_fitness)
-            print(f"Best Fitness: {best_fitness}")
+            self.mean_fitness_evolution.append(
+                np.mean(list(map(self.fitness, self.population)))
+            )
+            print(f"Best Fitness {i}: {best_fitness}")
 
-            # This is an algo-specific condition to stop search early if optimallity is reached
-            if best_fitness == self.chromosome_length:
-                return
+            if best_fitness >= 0.999 * SR:
+                break
+
+        self.best_chromosome = best_chromosome
 
         return
 
@@ -133,30 +176,36 @@ class GeneticAlgorithm:
 def main() -> None:
 
     # Define hyperparameters
-    mutation_rate = 0.001
-    crossover_rate = 0.75
+    mutation_rate = 0.01
+    crossover_rate = 0.80
 
-    chromosome_length_frontier = [10, 50, 100, 500, 1000]
+    # Define chromosome length
+    chromosome_length = len(ALPHA)
 
-    for chromosome_length in chromosome_length_frontier:
+    # Make population size a function of chromosome_length
+    population_size = chromosome_length * 2
 
-        # Make population size a function of chromosome_length
-        population_size = chromosome_length * 2
+    # These are all parameters to tune via CV
+    algo = GeneticAlgorithm(
+        population_size=population_size,
+        chromosome_length=chromosome_length,
+        mutation_rate=mutation_rate,
+        crossover_rate=crossover_rate,
+    )
+    algo.run(generations=10000)
+    pd.Series(algo.fitness_evolution).plot(label="Genetic Algorithm")
+    (pd.Series(algo.fitness_evolution) * 0 + SR).plot(label="Optimal")
+    plt.legend()
+    plt.title("Best Fitness")
+    plt.show()
 
-        # These are all parameters to tune via CV
-        algo = GeneticAlgorithm(
-            population_size=population_size,
-            chromosome_length=chromosome_length,
-            mutation_rate=mutation_rate,
-            crossover_rate=crossover_rate,
-        )
-        algo.run(generations=1000)
-        pd.Series(algo.fitness_evolution).plot(label="Genetic Algorithm")
-        (pd.Series(algo.fitness_evolution) * 0 + algo.chromosome_length).plot(
-            label="Optimal"
-        )
-        plt.legend()
-        plt.show()
+    pd.Series(algo.mean_fitness_evolution).plot(label="Genetic Algorithm")
+    (pd.Series(algo.fitness_evolution) * 0 + SR).plot(label="Optimal")
+    plt.legend()
+    plt.title("Mean Fitness")
+    plt.show()
+
+    print(algo.best_chromosome)
 
     return
 
