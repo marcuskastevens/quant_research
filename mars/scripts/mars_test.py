@@ -1,11 +1,7 @@
-"""
-TODO: fix interaction effect parameter
-"""
-
 import numpy as np
 import matplotlib.pyplot as plt
 
-from models.mars import MARS
+from models.regression.mars.mars import MARS
 
 
 def main():

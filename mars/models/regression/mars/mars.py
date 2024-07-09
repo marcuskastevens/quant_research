@@ -1,85 +1,25 @@
 import itertools
 from abc import ABC
-from typing import List
+from typing import List, Optional
 
 import numpy as np
 from sklearn.linear_model import LinearRegression
 
-from .model import RegressionModel
-
-
-class BasisFunction(ABC):
-
-    def evaluate(self, X: np.ndarray) -> np.ndarray:
-        raise NotImplementedError
-
-
-class HingeBasisFunction(BasisFunction):
-
-    def __init__(self, variable: int, knot: float, direction: str):
-
-        # Variable index
-        self.variable = variable
-
-        # Split value (knot)
-        self.knot = knot
-
-        # Split direction ('+' or '-')
-        self.direction = direction
-
-    def evaluate(self, X: np.ndarray) -> np.ndarray:
-        """
-        Evaluate the basis function on input data X.
-        """
-
-        if self.direction == "+":
-            # Evaluate the positive hinge function
-            return np.maximum(0, X[:, self.variable] - self.knot)
-        else:
-            # Evaluate the negative hinge function
-            return np.maximum(0, self.knot - X[:, self.variable])
-
-
-class BasisInteractionFunction(BasisFunction):
-
-    def __init__(self, basis_functions: List[BasisFunction]) -> None:
-
-        self.basis_functions = basis_functions
-
-        return
-
-    def evaluate(self, X: np.ndarray) -> np.ndarray:
-        """Evaluate the interaction basis function on input data X."""
-
-        interaction_term = np.ones(X.shape[0])
-
-        # Multiply the evaluated bases together
-        for basis_function in self.basis_functions:
-            interaction_term *= basis_function.evaluate(X=X)
-
-        return interaction_term
+from ...models import RegressionModel
+from .basis_functions import BasisFunction, HingeBasisFunction, BasisInteractionFunction
 
 
 class MARS(RegressionModel):
     def __init__(
         self,
-        X: np.ndarray,
-        y: np.ndarray,
-        max_terms: int = 10,
-        min_samples: int = 3,
-        max_interaction_term_degree: int = 1,
-        pruning: bool = True,
-        penalty: float = 2.0,
-    ):
-        # Store the features and response variable
-        self.X = X
-        self.y = y
+        max_terms: Optional[int] = 5,
+        max_interaction_term_degree: Optional[int] = 1,
+        pruning: Optional[bool] = True,
+        penalty: Optional[float] = 2.0,
+    ) -> None:
 
         # Maximum number of terms in the MARS model
         self.max_terms = max_terms
-
-        # Minimum number of samples to add a term
-        self.min_samples = min_samples
 
         # Maximum degree of interaction
         self.max_interaction_term_degree = max_interaction_term_degree
@@ -93,24 +33,36 @@ class MARS(RegressionModel):
         # List to store basis functions
         self.terms: List[BasisFunction] = []
 
+        # Placeholder for the features and response variable
+        self.X: np.ndarray = None
+        self.y: np.ndarray = None
+
+        # Define shape attribites
+        self.n_samples: int = None
+        self.n_features: int = None
+
         # Placeholder for the linear model
         self.model = None
 
-    def fit(self):
+        return
+
+    def fit(self, X: np.ndarray, y: np.ndarray) -> RegressionModel:
         """
         Fit the MARS model to the data X, y.
         """
 
-        n_samples, n_features = self.X.shape
+        self.X = X
+        self.y = y
+        self.n_samples, self.n_features = self.X.shape
 
         # Start with constant term
-        self.terms = [np.ones(n_samples)]
+        self.terms = [np.ones(shape=self.n_samples)]
 
         # Construct the initial design matrix
         H = self._design_matrix(self.X)
 
         # Fit the initial linear model
-        self.model = LinearRegression().fit(H, self.y)
+        self.model = LinearRegression().fit(X=H, y=self.y)
 
         for _ in range(self.max_terms - 1):
 
@@ -119,7 +71,7 @@ class MARS(RegressionModel):
             best_error = np.inf
 
             # Generate candidate basis functions
-            candidate_bases = self._generate_candidate_bases(n_features)
+            candidate_bases = self._generate_candidate_bases(self.n_features)
 
             for basis in candidate_bases:
 
@@ -154,6 +106,8 @@ class MARS(RegressionModel):
 
             # Perform backward pass pruning if enabled
             self._backward_pass()
+
+        return self
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         """

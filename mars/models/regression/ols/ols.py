@@ -1,0 +1,2 @@
+class OLS:
+    pass
